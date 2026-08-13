@@ -165,6 +165,24 @@ test("worker entries carry the deploy contract", () => {
   assert.equal(workers["gatekeeper-scheduler"].preinstall, true);
   assert.equal(workers["gatekeeper-scheduler"].singleton, true);
   assert.deepEqual(workers["gatekeeper-scheduler"].inputs, []);
+  const trom = workers["gatekeeper-trom"];
+  assert.equal(trom.installable, true);
+  assert.equal(trom.preinstall, undefined);
+  assert.equal(trom.singleton, true);
+  assert.deepEqual(
+      trom.inputs.map(({ name, kind }) => ({ name, kind })),
+      [
+        { name: "HKA_TROM_API_URL", kind: "var" },
+        { name: "HKA_TROM_USERNAME", kind: "secret" },
+        { name: "HKA_TROM_PASSWORD", kind: "secret" },
+      ]);
+  assert.deepEqual(
+      trom.bindings.filter((binding) => binding.type === "secret_text"),
+      [
+        { type: "secret_text", name: "HKA_TROM_USERNAME", text: "$SECRET(HKA_TROM_USERNAME)" },
+        { type: "secret_text", name: "HKA_TROM_PASSWORD", text: "$SECRET(HKA_TROM_PASSWORD)" },
+      ]);
+  assert.doesNotMatch(JSON.stringify(manifest), /hka-trom-password-value/);
   assert.equal(google.preinstall, undefined);
   assert.equal(google.singleton, undefined);
   for (const [name, entry] of Object.entries(workers)) {

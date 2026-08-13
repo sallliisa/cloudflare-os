@@ -1,0 +1,173 @@
+/** Inclusive calendar range in `YYYY-MM-DD`, interpreted in Asia/Jakarta. */
+export type TromPeriod = {
+  /** First day of the range, inclusive. */
+  start: string;
+  /** Last day of the range, inclusive. */
+  end: string;
+};
+
+/** A section identity returned by HKA TROM. */
+export interface TromSection {
+  /** TROM section identifier. */
+  id: number;
+  /** Source section code. */
+  code: string;
+  /** Source section name. */
+  name: string;
+  /** Source owner name, when present. */
+  ownerName: string | null;
+}
+
+/** SPM and SLA facts grouped by section for a period. */
+export interface SectionSpmSla {
+  /** TROM section identifier. */
+  sectionId: number;
+  /** Source section name. */
+  sectionName: string | null;
+  /** Source-computed SPM percentage. */
+  scoreSpm: number | null;
+  /** Source-computed SLA percentage. */
+  scoreSla: number | null;
+  /** Number of SPM/SLA records included by the source. */
+  totalSpm: number | null;
+}
+
+/** Incident counts grouped by section for a period. */
+export interface SectionIncidentCounts {
+  /** TROM section identifier. */
+  sectionId: number;
+  /** Source section name. */
+  sectionName: string | null;
+  /** Total incident rows. */
+  total: number | null;
+  /** Rows whose source status is `on_investigation`. */
+  onInvestigation: number | null;
+  /** Rows whose source status is `close`. */
+  closed: number | null;
+  /** Rows marked as accidents by the source. */
+  accidents: number | null;
+  /** Rows not marked as accidents by the source. */
+  notAccidents: number | null;
+}
+
+/** One incident row returned by HKA TROM. */
+export interface TromIncident {
+  /** TROM incident identifier. */
+  id: number;
+  /** TROM section identifier. */
+  sectionId: number | null;
+  /** Source section name. */
+  sectionName: string | null;
+  /** Source report number. */
+  reportNumber: string | null;
+  /** Source-formatted incident date and time. */
+  accidentAt: string | null;
+  /** Source incident name. */
+  name: string | null;
+  /** Source status code. */
+  status: string | null;
+  /** Source accident flag. */
+  isAccident: boolean | null;
+  /** Number of towing rows linked by the source. */
+  towingCount: number | null;
+  /** Number of victim rows linked by the source. */
+  victimCount: number | null;
+}
+
+/** Inspection counts grouped by section for a period. */
+export interface SectionInspectionCounts {
+  /** TROM section identifier. */
+  sectionId: number;
+  /** Source section code. */
+  sectionCode: string | null;
+  /** Source section name. */
+  sectionName: string | null;
+  /** Total inspection items. */
+  total: number | null;
+  /** Count for source category `r1`. */
+  r1: number | null;
+  /** Count for source category `r2`. */
+  r2: number | null;
+  /** Count for source category `r3`. */
+  r3: number | null;
+  /** Count for source label `p1`. */
+  p1: number | null;
+  /** Count for source label `p2`. */
+  p2: number | null;
+}
+
+/** Equipment availability facts grouped by section for a period. */
+export interface SectionEquipmentAvailability {
+  /** TROM section identifier. */
+  sectionId: number;
+  /** Source section code. */
+  sectionCode: string | null;
+  /** Source section name. */
+  sectionName: string | null;
+  /** Source owner identifier. */
+  ownerId: number | null;
+  /** Source owner name. */
+  ownerName: string | null;
+  /** Source owner color, when present. */
+  color: string | null;
+  /** Average VMS availability percentage. */
+  percentVms: number | null;
+  /** Average CCTV availability percentage. */
+  percentCctv: number | null;
+}
+
+/** Report totals returned for a period. */
+export interface ReportCompleteness {
+  /** Number of reports expected by the source. */
+  totalReport: number | null;
+  /** Number of reports recorded by the source. */
+  totalReported: number | null;
+  /** Source-computed difference between expected and recorded reports. */
+  totalNotReported: number | null;
+}
+
+/** One monthly running-cost row returned by HKA TROM. */
+export interface RunningCostMonth {
+  /** Source month, normally `YYYY-MM-01`. */
+  month: string | null;
+  /** Source budget amount. */
+  costBudget: number | null;
+  /** Source realization amount. */
+  costRealization: number | null;
+  /** Source-computed realization percentage. */
+  percent: number | null;
+}
+
+/** Running-cost facts grouped by section for a period. */
+export interface SectionRunningCost {
+  /** TROM section identifier. */
+  sectionId: number;
+  /** Source section code. */
+  sectionCode: string | null;
+  /** Source section name. */
+  sectionName: string | null;
+  /** Monthly rows in the source order. */
+  monthly: RunningCostMonth[];
+}
+
+/** Ambient, read-only HKA TROM capability. */
+export interface TromSession {
+  /** Lists visible section identities in the source order. */
+  listSections(): Promise<TromSection[]>;
+  /** Returns source SPM/SLA facts grouped by section. */
+  getSpmSlaBySection(period?: TromPeriod): Promise<SectionSpmSla[]>;
+  /** Returns source incident counts grouped by section. */
+  getIncidentCountsBySection(period?: TromPeriod): Promise<SectionIncidentCounts[]>;
+  /** Returns source incident rows in the source order. */
+  listIncidents(period?: TromPeriod, sectionId?: number): Promise<TromIncident[]>;
+  /** Returns source inspection counts grouped by section. */
+  getInspectionCountsBySection(period?: TromPeriod): Promise<SectionInspectionCounts[]>;
+  /** Returns source equipment availability facts grouped by section. */
+  getEquipmentAvailabilityBySection(
+    period?: TromPeriod,
+  ): Promise<SectionEquipmentAvailability[]>;
+  /** Returns source report totals for a period. */
+  getReportCompleteness(period?: TromPeriod): Promise<ReportCompleteness>;
+  /** Returns source monthly running-cost rows grouped by section. */
+  getRunningCostBySection(period?: TromPeriod): Promise<SectionRunningCost[]>;
+}

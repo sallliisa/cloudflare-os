@@ -1,0 +1,26 @@
+{
+  "name": "@gadgets/gatekeeper-trom",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/worker.ts",
+  "scripts": {
+    "build": "tsc",
+    "types:check": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "types:generate": "wrangler types worker-configuration.d.ts",
+    "test": "vitest run",
+    "dev": "echo \"run 'pnpm dev-server' in the root directory instead\" >&2 && exit 1",
+    "clean": "rm -rf dist .wrangler"
+  },
+  "dependencies": {
+    "@gadgets/workshop-shared": "workspace:*",
+    "capnweb": "catalog:",
+    "capnweb-validate": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "miniflare": "5.20260801.0-alpha",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

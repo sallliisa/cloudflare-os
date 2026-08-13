@@ -899,6 +899,76 @@
         "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/supabase"
       }
     },
+    "gatekeeper-trom": {
+      "bindings": [
+        {
+          "name": "HKA_TROM_USERNAME",
+          "text": "$SECRET(HKA_TROM_USERNAME)",
+          "type": "secret_text"
+        },
+        {
+          "name": "HKA_TROM_PASSWORD",
+          "text": "$SECRET(HKA_TROM_PASSWORD)",
+          "type": "secret_text"
+        }
+      ],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage",
+        "nodejs_als"
+      ],
+      "inputs": [
+        {
+          "help": "HTTPS base URL for the HKA TROM API, without the /api path.",
+          "kind": "var",
+          "label": "HKA TROM API URL",
+          "name": "HKA_TROM_API_URL"
+        },
+        {
+          "kind": "secret",
+          "label": "HKA TROM username",
+          "name": "HKA_TROM_USERNAME"
+        },
+        {
+          "kind": "secret",
+          "label": "HKA TROM password",
+          "name": "HKA_TROM_PASSWORD"
+        }
+      ],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "trom.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "TromGatekeeper"
+          ],
+          "tag": "v1"
+        }
+      ],
+      "modules": [
+        {
+          "name": "trom.js",
+          "r2Key": "blobs/modules/9fe5f9348631cb28b8407ce9f0661e776ba4caeb6ec1941ab51d8c6800281fd3",
+          "sha256": "9fe5f9348631cb28b8407ce9f0661e776ba4caeb6ec1941ab51d8c6800281fd3",
+          "size": 57,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "shortName": "trom",
+      "singleton": true,
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/trom",
+        "HKA_TROM_ALLOW_INSECURE": "false"
+      }
+    },
     "gatekeeper-zoominfo": {
       "bindings": [
         {

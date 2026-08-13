@@ -1,0 +1,18 @@
+[
+  {
+    "name": "HKA_TROM_API_URL",
+    "kind": "var",
+    "label": "HKA TROM API URL",
+    "help": "HTTPS base URL for the HKA TROM API, without the /api path."
+  },
+  {
+    "name": "HKA_TROM_USERNAME",
+    "kind": "secret",
+    "label": "HKA TROM username"
+  },
+  {
+    "name": "HKA_TROM_PASSWORD",
+    "kind": "secret",
+    "label": "HKA TROM password"
+  }
+]

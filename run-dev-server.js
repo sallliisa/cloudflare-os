@@ -203,6 +203,12 @@ const PASSTHROUGH_GATEKEEPER_VARS = {
     "MCP_PORTAL_TRUST_ANNOTATIONS", "MCP_ALLOW_INSECURE",
   ],
   "gatekeeper-mcp": ["MCP_ALLOW_INSECURE"],
+  "gatekeeper-trom": [
+    "HKA_TROM_API_URL",
+    "HKA_TROM_USERNAME",
+    "HKA_TROM_PASSWORD",
+    "HKA_TROM_ALLOW_INSECURE",
+  ],
 };
 
 for (const gk of gatekeepers) {
