@@ -39,9 +39,26 @@ jobs:
             git reset --hard origin/main
             pnpm install --frozen-lockfile
             install -m 700 scripts/cfos-run-local-wrapper.mjs "$HOME/cfos-run-local-wrapper.mjs"
+            install -m 700 scripts/ai-stream-relay.mjs "$HOME/cfos-ai-stream-relay.mjs"
 
             export PUBLIC_BASE_URL=https://cfos.berinovasi.top
             export DISABLE_DEV_WATCHERS=true
+            export AI_STREAM_RELAY_UPSTREAM_ORIGIN=https://api.futureppo.top
+            if "$PM2_NODE" "$PM2" describe cfos-ai-relay >/dev/null 2>&1; then
+              "$PM2_NODE" "$PM2" restart cfos-ai-relay --update-env --kill-timeout 7000
+            else
+              "$PM2_NODE" "$PM2" start "$HOME/cfos-ai-stream-relay.mjs" --name cfos-ai-relay \
+                --interpreter "$NVM_DIR/versions/node/v22.23.2/bin/node" --kill-timeout 7000
+            fi
+
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:18789/healthz; then
+                break
+              fi
+              sleep 2
+              if [ "$attempt" -eq 30 ]; then exit 1; fi
+            done
+
             if "$PM2_NODE" "$PM2" describe cfos >/dev/null 2>&1; then
               "$PM2_NODE" "$PM2" restart cfos --update-env --kill-timeout 7000
             else
@@ -50,7 +67,10 @@ jobs:
             fi
 
             for attempt in $(seq 1 30); do
-              curl --fail --silent --show-error --max-time 5 https://cfos.berinovasi.top/ && exit 0
+              if curl --fail --silent --show-error --max-time 5 https://cfos.berinovasi.top/; then
+                "$PM2_NODE" "$PM2" save
+                exit 0
+              fi
               sleep 2
             done
             exit 1
