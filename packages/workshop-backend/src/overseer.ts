@@ -3574,9 +3574,8 @@ class OverseerImpl implements AgentHooks {
     });
 
     if (prepared.message !== undefined && userMeta.aiModel) {
-      let needsAgentTurnKeepAlive = responseTargetRegistration !== undefined;
       this.startAgent(chatId, userMeta.aiModel, userMeta.profile,
-                      clientUser.id.toString(), false, needsAgentTurnKeepAlive);
+                      clientUser.id.toString());
     }
 
     if (userMeta.quickModel) {
@@ -3649,9 +3648,8 @@ class OverseerImpl implements AgentHooks {
     });
 
     if (runsAgentTurn && userMeta.aiModel) {
-      let needsAgentTurnKeepAlive = responseTargetRegistration !== undefined;
       this.startAgent(chatId, userMeta.aiModel, userMeta.profile,
-                      clientUser.id.toString(), false, needsAgentTurnKeepAlive);
+                      clientUser.id.toString());
     }
     this.recordGadgetAnalytics({
       event_name: "gadget_interaction",
@@ -3938,8 +3936,7 @@ class OverseerImpl implements AgentHooks {
   // needed to re-resolve the model config on resume.
   startAgent(chatId: number, aiModel: UserAiModelRecord,
              initiator: AiChatAuthorInfo, initiatorUserId: string,
-             callbackInitiated: boolean = false,
-             keepAlive: boolean = false): void {
+             callbackInitiated: boolean = false): void {
     // Register before starting the turn so registration always precedes the turn's teardown
     // (`#unregisterRunningAgent`, in `#runAgentTurn`'s finally).
     this.#registerRunningAgent(chatId);
@@ -3953,7 +3950,7 @@ class OverseerImpl implements AgentHooks {
 
     let liveChat = this.#getLiveChat(chatId);
     let turn = this.#runAgentTurn(chatId, aiModel, initiator, callbackInitiated, liveChat);
-    if (keepAlive) this.ctx.waitUntil(turn);
+    this.ctx.waitUntil(turn);
   }
 
   #runAgentTurn(chatId: number, aiModel: UserAiModelRecord,
