@@ -1,0 +1,57 @@
+name: Deploy CFOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfos-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' '[office.berinovasi.top]:2203 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG/5GvpMpn2hTwycGeoxOZA1Q445aLuPIHxAEldsQG/A' > ~/.ssh/known_hosts
+
+      - name: Deploy and verify
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p 2203 deploy@office.berinovasi.top 'bash -se' <<'REMOTE'
+            set -euo pipefail
+            export NVM_DIR="$HOME/.nvm"
+            export PATH="$NVM_DIR/versions/node/v22.23.2/bin:$PATH"
+            PM2_NODE="$NVM_DIR/versions/node/v20.20.2/bin/node"
+            PM2="$NVM_DIR/versions/node/v20.20.2/lib/node_modules/pm2/bin/pm2"
+            APP_DIR="$HOME/cloudflare-os"
+
+            cd "$APP_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+            pnpm install --frozen-lockfile
+            install -m 700 scripts/cfos-run-local-wrapper.mjs "$HOME/cfos-run-local-wrapper.mjs"
+
+            export PUBLIC_BASE_URL=https://cfos.berinovasi.top
+            export DISABLE_DEV_WATCHERS=true
+            if "$PM2_NODE" "$PM2" describe cfos >/dev/null 2>&1; then
+              "$PM2_NODE" "$PM2" restart cfos --update-env --kill-timeout 7000
+            else
+              "$PM2_NODE" "$PM2" start "$HOME/cfos-run-local-wrapper.mjs" --name cfos \
+                --interpreter "$NVM_DIR/versions/node/v22.23.2/bin/node" --kill-timeout 7000 -- --port 8787
+            fi
+
+            for attempt in $(seq 1 30); do
+              curl --fail --silent --show-error --max-time 5 https://cfos.berinovasi.top/ && exit 0
+              sleep 2
+            done
+            exit 1
+          REMOTE

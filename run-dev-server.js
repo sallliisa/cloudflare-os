@@ -96,14 +96,18 @@ const gatekeepers = findGatekeepers(PACKAGES_DIR);
 // autoProvisionsAccount, so core auto-provisions one Context account per user. The only extra
 // wiring it needs is a sharingDomain in its binding props (see below).
 const CONTEXT_GATEKEEPER_NAME = "gatekeeper-context";
+const SHUTDOWN_TIMEOUT_MS = 5_000;
 
 // Rebuild each gatekeeper's generated UI (src/generated/*) on source change so edits show up on
 // reload; wrangler dev's `watch_dir: src` then re-bundles the worker.
 const devWatchers = [];
 let stoppingDevWatchers = false;
+let wranglerChild = null;
+let shutdownTimer = null;
 
 // Spawn a persistent watcher.
 function spawnDevWatcher(label, command, args) {
+  if (process.env.DISABLE_DEV_WATCHERS === "true") return;
   const watcher = spawn(command, args, { stdio: "inherit", cwd: ROOT });
   watcher.on("exit", (code, signal) => {
     if (stoppingDevWatchers) return;
@@ -138,14 +142,33 @@ function stopDevWatchers() {
 }
 
 process.on("exit", stopDevWatchers);
-process.on("SIGINT", () => {
+function stopWrangler(signal) {
   stopDevWatchers();
-  process.exit(130);
-});
-process.on("SIGTERM", () => {
-  stopDevWatchers();
-  process.exit(143);
-});
+  if (shutdownTimer !== null) return;
+  if (wranglerChild?.exitCode !== null) {
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  }
+
+  try {
+    if (process.platform === "win32") wranglerChild.kill(signal);
+    else process.kill(-wranglerChild.pid, signal);
+  } catch (err) {
+    if (err.code !== "ESRCH") throw err;
+  }
+  shutdownTimer = setTimeout(() => {
+    if (wranglerChild.exitCode !== null) return;
+    console.warn(`Wrangler did not stop within ${SHUTDOWN_TIMEOUT_MS}ms; forcing shutdown.`);
+    try {
+      if (process.platform === "win32") wranglerChild.kill("SIGKILL");
+      else process.kill(-wranglerChild.pid, "SIGKILL");
+    } catch (err) {
+      if (err.code !== "ESRCH") throw err;
+    }
+  }, SHUTDOWN_TIMEOUT_MS);
+}
+
+process.on("SIGINT", () => stopWrangler("SIGINT"));
+process.on("SIGTERM", () => stopWrangler("SIGTERM"));
 
 // Helper: "gatekeeper-github" -> "GATEKEEPER_GITHUB"
 function bindingName(gk) {
@@ -327,11 +350,19 @@ if (wranglerPort) {
 }
 console.log(`\nStarting: wrangler dev ${args.join(" ")}\n`);
 
-try {
-  execFileSync("pnpm", ["exec", "wrangler", "dev", ...args],
-      { stdio: "inherit", cwd: ROOT });
-} catch (e) {
-  // wrangler was killed or exited with an error; the output was already shown
-  // via stdio: "inherit", so just propagate the exit code.
-  process.exit(e.status ?? 1);
-}
+// Keep Wrangler and its workerd children in their own process group. A remote connection can hang
+// Wrangler's graceful shutdown; the timeout above then reaps the entire group instead of leaving
+// workerd bound to the port.
+wranglerChild = spawn("pnpm", ["exec", "wrangler", "dev", ...args], {
+  stdio: "inherit",
+  cwd: ROOT,
+  detached: process.platform !== "win32",
+});
+wranglerChild.on("error", err => {
+  console.error(`wrangler dev could not be started: ${err.message}`);
+  process.exit(1);
+});
+wranglerChild.on("exit", (code, signal) => {
+  if (shutdownTimer !== null) clearTimeout(shutdownTimer);
+  process.exit(signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : code ?? 1);
+});

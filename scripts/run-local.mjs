@@ -153,6 +153,17 @@ const server = spawn(
     [join(ROOT, "run-dev-server.js"), "--serve-frontend-assets", ...passthroughArgs],
     { stdio: "inherit", cwd: ROOT });
 
+let stopping = false;
+function stopServer(signal) {
+  if (stopping) return;
+  stopping = true;
+  if (server.exitCode === null) server.kill(signal);
+  else process.exit(signal === "SIGINT" ? 130 : 143);
+}
+
+process.on("SIGINT", () => stopServer("SIGINT"));
+process.on("SIGTERM", () => stopServer("SIGTERM"));
+
 server.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
   else process.exit(code ?? 0);
