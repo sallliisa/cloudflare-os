@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { describe, it } from "node:test";
 
-import { createAiStreamRelay, validateUpstreamOrigin } from "./ai-stream-relay.mjs";
+import { createAiStreamRelay, isRelayEntrypoint, validateUpstreamOrigin } from "./ai-stream-relay.mjs";
 
 const encoder = new TextEncoder();
 
@@ -52,6 +52,12 @@ describe("validateUpstreamOrigin", () => {
 
   it("accepts a plain HTTPS origin", () => {
     assert.equal(validateUpstreamOrigin("https://upstream.example").origin, "https://upstream.example");
+  });
+});
+
+describe("isRelayEntrypoint", () => {
+  it("recognizes PM2's forked child process", () => {
+    assert.equal(isRelayEntrypoint([], { pm_id: "0" }), true);
   });
 });
 

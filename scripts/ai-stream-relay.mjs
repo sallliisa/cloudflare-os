@@ -18,6 +18,7 @@ const HOP_BY_HOP_HEADERS = new Set([
 const RESPONSE_ONLY_DROPPED_HEADERS = new Set(["content-encoding", "content-length"]);
 const DEFAULT_PORT = 18789;
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000;
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
 /** Validates the fixed HTTPS origin used for every relayed request. */
 export function validateUpstreamOrigin(value) {
@@ -42,6 +43,11 @@ export function validatePort(value) {
     throw new Error("AI_STREAM_RELAY_PORT must be an integer between 0 and 65535");
   }
   return port;
+}
+
+/** Returns whether Node or PM2 launched this module as the relay process. */
+export function isRelayEntrypoint(argv, environment) {
+  return argv[1] === SCRIPT_PATH || environment.pm_id !== undefined;
 }
 
 function requestHeaders(headers) {
@@ -175,7 +181,7 @@ export function createAiStreamRelay({
   };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isRelayEntrypoint(process.argv, process.env)) {
   const relay = createAiStreamRelay({
     upstreamOrigin: process.env.AI_STREAM_RELAY_UPSTREAM_ORIGIN,
     port: process.env.AI_STREAM_RELAY_PORT ?? DEFAULT_PORT,
