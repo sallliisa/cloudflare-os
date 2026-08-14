@@ -52,7 +52,7 @@ jobs:
             fi
 
             relay_healthy=false
-            for attempt in $(seq 1 30); do
+            for attempt in $(seq 1 120); do
               if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:18789/healthz; then
                 relay_healthy=true
                 break
