@@ -1,5 +1,6 @@
+import { RpcStub as NativeRpcStub, RpcTarget } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { TromSessionImpl } from "../src/trom.js";
+import { TromGatekeeper, TromSessionImpl } from "../src/trom.js";
 import {
   TromApi,
   type TromApiEnvironment,
@@ -170,6 +171,230 @@ describe("TromApi", () => {
     await expect(insecureApi.listSections()).resolves.toEqual([]);
   });
 
+  it("normalizes the bounded SPM/SLA trend and sends its period and section", async () => {
+    const requests: string[] = [];
+    const api = apiWith(async (input) => {
+      requests.push(String(input));
+      return String(input).endsWith("/api/login")
+        ? loginResponse()
+        : dataResponse([{ month: "2026-07-01", score_spm: "96.5", score_sla: null }]);
+    });
+
+    await expect(api.getSpmSlaTrend({ start: "2026-07-01", end: "2026-08-13" }, 7))
+      .resolves.toEqual([{ month: "2026-07-01", scoreSpm: 96.5, scoreSla: null }]);
+    const request = new URL(requests.at(-1)!);
+    expect(request.pathname).toBe("/api/dashboard/spm-sla/trend-spm-sla");
+    expect(Object.fromEntries(request.searchParams)).toEqual({
+      start_month: "2026-07-01",
+      end_month: "2026-08-13",
+      section_id: "7",
+    });
+  });
+
+  it("filters and caps mixed SPM indicator detail without claiming result provenance", async () => {
+    const requests: string[] = [];
+    const rows = [
+      { category: "substance", id: "3", name: "Safety" },
+      ...Array.from({ length: 251 }, (_, index) => ({
+        category: "spm",
+        id: String(index + 1),
+        service_substance_id: "3",
+        code: `SPM-${index + 1}`,
+        indicator: `Indicator ${index + 1}`,
+        sub_indicator: index === 0 ? null : `Sub ${index + 1}`,
+        spm_specification: ">= 95",
+        spm_parameter: "95",
+        sla_specification: "< 2",
+        sla_parameter: "2",
+        operator: "gte",
+        unit: "%",
+        spm_score: index % 2 === 0 ? "1" : "0",
+        sla_score: null,
+      })),
+    ];
+    const api = apiWith(async (input) => {
+      requests.push(String(input));
+      return String(input).endsWith("/api/login")
+        ? loginResponse()
+        : response({
+        success: true,
+        section_id: "7",
+        section_name: "Alpha",
+        last_updated_at: "2026-08-13T03:00:00Z",
+        score_spm: "80",
+        score_sla: null,
+        data: rows,
+      });
+    });
+
+    const result = await api.getSpmSlaIndicatorDetail(7, {
+      start: "2026-08-01",
+      end: "2026-08-13",
+    });
+    const request = new URL(requests.at(-1)!);
+    expect(request.pathname).toBe("/api/dashboard/spm-sla/detail-section-spm-sla");
+    expect(Object.fromEntries(request.searchParams)).toEqual({
+      section_id: "7",
+      start_periode: "2026-08-01",
+      end_periode: "2026-08-13",
+    });
+    expect(result.sectionId).toBe(7);
+    expect(result.scoreSpm).toBe(80);
+    expect(result.scoreSla).toBeNull();
+    expect(result.indicators).toHaveLength(250);
+    expect(result.truncated).toBe(true);
+    expect(result.indicators[0]).toEqual({
+      id: 1,
+      serviceSubstanceId: 3,
+      code: "SPM-1",
+      indicator: "Indicator 1",
+      subIndicator: null,
+      spmSpecification: ">= 95",
+      spmParameter: 95,
+      slaSpecification: "< 2",
+      slaParameter: 2,
+      operator: "gte",
+      unit: "%",
+      spmScore: true,
+      slaScore: null,
+      resultBasis: "measured-or-default-unidentified",
+    });
+    expect(result.indicators.at(-1)?.id).toBe(250);
+  });
+
+  it("projects paged major damage exposures without sensitive upstream fields", async () => {
+    const requests: string[] = [];
+    const api = apiWith(async (input) => {
+      requests.push(String(input));
+      return String(input).endsWith("/api/login")
+        ? loginResponse()
+        : response({
+          success: true,
+          data: [{
+            id: "4",
+            section_id: "7",
+            rel_section_id: "Alpha",
+            date: "2026-08-12",
+            rel_asset_id: "Bridge 1 Jalur A",
+            sta_start: "10.5",
+            sta_end: "11.5",
+            rel_damage_category_id: "Pothole",
+            damage_criteria: "Wide",
+            damage_description: "Surface damage",
+            repair_priority: "P1",
+            rel_repair_recommendation_id: "Internal repair",
+            repair_status_code: "ON_PROGRESS",
+            major_repair_type: "INTERNAL_REPAIR",
+            stage: "40",
+            spm_due_at: "2026-08-14T00:00:00Z",
+            sla_due_at: null,
+            created_at: "2026-08-12T00:00:00Z",
+            updated_at: "2026-08-13T00:00:00Z",
+            damage_followed_up_by: 99,
+            img_damage: { url: "secret" },
+            latitude: "-6.2",
+            longitude: "106.8",
+            raw_file: "secret",
+          }],
+          total: "1",
+          totalPage: "1",
+        });
+    });
+
+    const result = await api.listMajorAssetDamageExposures({
+      period: { start: "2026-08-01", end: "2026-08-13" },
+      repairStatus: "ON_PROGRESS",
+      sectionId: 7,
+      page: 2,
+      limit: 25,
+    });
+    expect(result).toEqual({
+      rows: [{
+        id: 4,
+        sectionId: 7,
+        sectionName: "Alpha",
+        date: "2026-08-12",
+        assetLabel: "Bridge 1 Jalur A",
+        staStart: 10.5,
+        staEnd: 11.5,
+        damageCategory: "Pothole",
+        damageCriteria: "Wide",
+        damageDescription: "Surface damage",
+        repairPriority: "P1",
+        repairRecommendation: "Internal repair",
+        repairStatus: "ON_PROGRESS",
+        majorRepairType: "INTERNAL_REPAIR",
+        currentStage: 40,
+        spmDueAt: "2026-08-14T00:00:00Z",
+        slaDueAt: null,
+        createdAt: "2026-08-12T00:00:00Z",
+        updatedAt: "2026-08-13T00:00:00Z",
+      }],
+      total: 1,
+      totalPages: 1,
+      page: 2,
+      limit: 25,
+    });
+    expect(Object.keys(result.rows[0])).not.toEqual(
+      expect.arrayContaining(["damage_followed_up_by", "img_damage", "latitude", "longitude", "raw_file"]),
+    );
+    const request = new URL(requests.at(-1)!);
+    expect(request.pathname).toBe("/api/major-asset-damages/list");
+    expect(Object.fromEntries(request.searchParams)).toEqual({
+      start_date: "2026-08-01",
+      end_date: "2026-08-13",
+      repair_status_code: "ON_PROGRESS",
+      page: "2",
+      limit: "25",
+      section_id: "7",
+    });
+
+    await expect(api.listMajorAssetDamageExposures({
+      period: { start: "2026-08-01", end: "2026-08-13" },
+      repairStatus: "OPEN",
+    })).resolves.toMatchObject({ page: 1, limit: 50 });
+    const defaultRequest = new URL(requests.at(-1)!);
+    expect(defaultRequest.searchParams.get("repair_status_code")).toBe("OPEN");
+    expect(defaultRequest.searchParams.get("page")).toBe("1");
+    expect(defaultRequest.searchParams.get("limit")).toBe("50");
+  });
+
+  it.each([
+    ["status", { period: { start: "2026-08-01", end: "2026-08-13" }, repairStatus: "CLOSED" }],
+    ["section", { period: { start: "2026-08-01", end: "2026-08-13" }, repairStatus: "OPEN", sectionId: 0 }],
+    ["page", { period: { start: "2026-08-01", end: "2026-08-13" }, repairStatus: "OPEN", page: 1.5 }],
+    ["limit", { period: { start: "2026-08-01", end: "2026-08-13" }, repairStatus: "OPEN", limit: 51 }],
+    ["period", { period: { start: "2026-02-30", end: "2026-08-13" }, repairStatus: "OPEN" }],
+  ])("rejects invalid exposure %s before any upstream call", async (_label, query) => {
+    const fetchMock = vi.fn(async () => dataResponse([]));
+    const api = apiWith(fetchMock);
+
+    await expect(api.listMajorAssetDamageExposures(query as never)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-month report completeness before any upstream call", async () => {
+    const fetchMock = vi.fn(async () => dataResponse({}));
+    const api = apiWith(fetchMock);
+
+    await expect(api.getReportCompleteness({
+      start: "2026-07-31",
+      end: "2026-08-01",
+    })).rejects.toThrow("one calendar month");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing required normalized detail fields", async () => {
+    const api = apiWith(async (input) => String(input).endsWith("/api/login")
+      ? loginResponse()
+      : response({ success: true, data: [] }));
+
+    await expect(api.getSpmSlaIndicatorDetail(7, {
+      start: "2026-08-01",
+      end: "2026-08-13",
+    })).rejects.toThrow("invalid data");
+  });
+
   it("normalizes numeric strings, nullable fields, booleans, and monthly rows", async () => {
     const api = apiWith(async (input) => {
       const url = String(input);
@@ -239,6 +464,19 @@ describe("TromSessionImpl", () => {
     const fakeApi = {
       listSections: vi.fn(async () => { events.push("fetch"); return []; }),
       getSpmSlaBySection: vi.fn(async () => { events.push("fetch"); return []; }),
+      getSpmSlaTrend: vi.fn(async () => { events.push("fetch"); return []; }),
+      getSpmSlaIndicatorDetail: vi.fn(async () => { events.push("fetch"); return {
+        sectionId: 1,
+        sectionName: null,
+        lastUpdatedAt: null,
+        scoreSpm: null,
+        scoreSla: null,
+        indicators: [],
+        truncated: false,
+      }; }),
+      listMajorAssetDamageExposures: vi.fn(async () => { events.push("fetch"); return {
+        rows: [], total: 0, totalPages: 0, page: 1, limit: 50,
+      }; }),
       getIncidentCountsBySection: vi.fn(async () => { events.push("fetch"); return []; }),
       listIncidents: vi.fn(async () => { events.push("fetch"); return []; }),
       getInspectionCountsBySection: vi.fn(async () => { events.push("fetch"); return []; }),
@@ -259,6 +497,12 @@ describe("TromSessionImpl", () => {
     const calls = [
       () => session.listSections(),
       () => session.getSpmSlaBySection(),
+      () => session.getSpmSlaTrend({ start: "2026-08-01", end: "2026-08-13" }),
+      () => session.getSpmSlaIndicatorDetail(1, { start: "2026-08-01", end: "2026-08-13" }),
+      () => session.listMajorAssetDamageExposures({
+        period: { start: "2026-08-01", end: "2026-08-13" },
+        repairStatus: "OPEN",
+      }),
       () => session.getIncidentCountsBySection(),
       () => session.listIncidents(),
       () => session.getInspectionCountsBySection(),
@@ -284,5 +528,46 @@ describe("TromSessionImpl", () => {
     const keys = Object.keys(result[0]);
     expect(keys).toEqual(["id", "code", "name", "ownerName"]);
     expect(keys.every((key) => !/attention|priority|severity|rank|recommend/i.test(key))).toBe(true);
+  });
+});
+
+describe("TROM executive slash command", () => {
+  it("advertises and expands one fixed command without reading TROM", async () => {
+    const gatekeeper = TromGatekeeper.prototype as unknown as TromGatekeeper;
+    const description = await gatekeeper.describe();
+    expect(description.hasSlashCommands).toBe(true);
+
+    const provider = await gatekeeper.getSlashCommandProvider();
+    const authorizeObservation = vi.fn(async () => {});
+    class TestAuthorizer extends RpcTarget {
+      authorizeObservation(): Promise<void> {
+        return authorizeObservation();
+      }
+    }
+    const authorizer = new NativeRpcStub(new TestAuthorizer());
+    const expected =
+      "Use the HKA TROM capability to conduct an executive investigation of SPM/SLA exposure for the coming quarter. Screen the section portfolio, form candidate hypotheses, drill into relevant operational evidence, seek counter-evidence, and discard weak or immaterial findings. For each remaining finding, state the section, indicator, period, baseline, supporting evidence, contrary evidence, data limitations, materiality, intervention window, confidence, and what would disprove the conclusion. Do not treat missing records as good performance, invent unavailable facts, or produce an opaque risk score. Present the investigation in this chat. Afterward, if Scheduled Tasks is available, offer to establish a monthly investigation and quarterly synthesis in this same chat; do not create recurring automation without explicit approval.";
+
+    try {
+      await expect(provider.list()).resolves.toEqual([{
+        id: "trom-executive-review",
+        name: "trom-executive-review",
+        description: "Start a factual executive SPM/SLA investigation.",
+      }]);
+      await expect(provider.invoke(
+        "trom-executive-review",
+        "prioritize section 7",
+        authorizer as never,
+      )).resolves.toEqual({ message: expected });
+      await expect(provider.invoke("trom-executive-review", "", authorizer as never))
+        .resolves.toEqual({ message: expected });
+      await expect(provider.invoke("unknown", "", authorizer as never)).rejects.toThrow(
+        "Unknown HKA TROM slash command",
+      );
+      expect(authorizeObservation).not.toHaveBeenCalled();
+    } finally {
+      authorizer[Symbol.dispose]?.();
+      (provider as unknown as { [Symbol.dispose]?: () => void })[Symbol.dispose]?.();
+    }
   });
 });

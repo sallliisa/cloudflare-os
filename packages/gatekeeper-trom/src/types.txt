@@ -32,6 +32,86 @@ export interface SectionSpmSla {
   totalSpm: number | null;
 }
 
+/** One monthly SPM/SLA trend point returned by HKA TROM. */
+export interface SpmSlaTrendPoint {
+  month: string | null;
+  scoreSpm: number | null;
+  scoreSla: number | null;
+}
+
+/** One bounded SPM indicator result returned by HKA TROM. */
+export interface SpmSlaIndicator {
+  id: number;
+  serviceSubstanceId: number | null;
+  code: string | null;
+  indicator: string | null;
+  subIndicator: string | null;
+  spmSpecification: string | null;
+  spmParameter: number | null;
+  slaSpecification: string | null;
+  slaParameter: number | null;
+  operator: string | null;
+  unit: string | null;
+  spmScore: boolean | null;
+  slaScore: boolean | null;
+  resultBasis: "measured-or-default-unidentified";
+}
+
+/** Bounded SPM/SLA indicator detail for one section and period. */
+export interface SpmSlaIndicatorDetail {
+  sectionId: number;
+  sectionName: string | null;
+  lastUpdatedAt: string | null;
+  scoreSpm: number | null;
+  scoreSla: number | null;
+  indicators: SpmSlaIndicator[];
+  truncated: boolean;
+}
+
+/** Repair states supported by the major-damage endpoint. */
+export type MajorAssetDamageRepairStatus = "OPEN" | "ON_PROGRESS";
+
+/** Bounded query for major asset damage exposures. */
+export interface MajorAssetDamageExposureQuery {
+  period: TromPeriod;
+  repairStatus: MajorAssetDamageRepairStatus;
+  sectionId?: number;
+  page?: number;
+  limit?: number;
+}
+
+/** Safe, person-free projection of one major asset damage exposure. */
+export interface MajorAssetDamageExposure {
+  id: number;
+  sectionId: number;
+  sectionName: string | null;
+  date: string | null;
+  assetLabel: string | null;
+  staStart: number | null;
+  staEnd: number | null;
+  damageCategory: string | null;
+  damageCriteria: string | null;
+  damageDescription: string | null;
+  repairPriority: string | null;
+  repairRecommendation: string | null;
+  repairStatus: string | null;
+  majorRepairType: string | null;
+  currentStage: number | null;
+  spmDueAt: string | null;
+  slaDueAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** One bounded page of major asset damage exposures. */
+export interface MajorAssetDamageExposurePage {
+  rows: MajorAssetDamageExposure[];
+  total: number;
+  totalPages: number;
+  page: number;
+  limit: number;
+}
+
 /** Incident counts grouped by section for a period. */
 export interface SectionIncidentCounts {
   /** TROM section identifier. */
@@ -156,6 +236,17 @@ export interface TromSession {
   listSections(): Promise<TromSection[]>;
   /** Returns source SPM/SLA facts grouped by section. */
   getSpmSlaBySection(period?: TromPeriod): Promise<SectionSpmSla[]>;
+  /** Returns monthly SPM/SLA trend facts in the source order. */
+  getSpmSlaTrend(period: TromPeriod, sectionId?: number): Promise<SpmSlaTrendPoint[]>;
+  /** Returns bounded SPM/SLA indicator detail without inferring result provenance. */
+  getSpmSlaIndicatorDetail(
+    sectionId: number,
+    period: TromPeriod,
+  ): Promise<SpmSlaIndicatorDetail>;
+  /** Returns a bounded, person-free page of major asset damage exposures. */
+  listMajorAssetDamageExposures(
+    query: MajorAssetDamageExposureQuery,
+  ): Promise<MajorAssetDamageExposurePage>;
   /** Returns source incident counts grouped by section. */
   getIncidentCountsBySection(period?: TromPeriod): Promise<SectionIncidentCounts[]>;
   /** Returns source incident rows in the source order. */

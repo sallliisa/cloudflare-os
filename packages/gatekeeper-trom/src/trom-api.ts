@@ -20,6 +20,86 @@ export interface SectionSpmSla {
   totalSpm: number | null;
 }
 
+/** One monthly SPM/SLA trend point returned by HKA TROM. */
+export interface SpmSlaTrendPoint {
+  month: string | null;
+  scoreSpm: number | null;
+  scoreSla: number | null;
+}
+
+/** One bounded SPM indicator result returned by HKA TROM. */
+export interface SpmSlaIndicator {
+  id: number;
+  serviceSubstanceId: number | null;
+  code: string | null;
+  indicator: string | null;
+  subIndicator: string | null;
+  spmSpecification: string | null;
+  spmParameter: number | null;
+  slaSpecification: string | null;
+  slaParameter: number | null;
+  operator: string | null;
+  unit: string | null;
+  spmScore: boolean | null;
+  slaScore: boolean | null;
+  resultBasis: "measured-or-default-unidentified";
+}
+
+/** Bounded SPM/SLA indicator detail for one section and period. */
+export interface SpmSlaIndicatorDetail {
+  sectionId: number;
+  sectionName: string | null;
+  lastUpdatedAt: string | null;
+  scoreSpm: number | null;
+  scoreSla: number | null;
+  indicators: SpmSlaIndicator[];
+  truncated: boolean;
+}
+
+/** Repair states supported by the major-damage endpoint. */
+export type MajorAssetDamageRepairStatus = "OPEN" | "ON_PROGRESS";
+
+/** Bounded query for major asset damage exposures. */
+export interface MajorAssetDamageExposureQuery {
+  period: TromPeriod;
+  repairStatus: MajorAssetDamageRepairStatus;
+  sectionId?: number;
+  page?: number;
+  limit?: number;
+}
+
+/** Safe, person-free projection of one major asset damage exposure. */
+export interface MajorAssetDamageExposure {
+  id: number;
+  sectionId: number;
+  sectionName: string | null;
+  date: string | null;
+  assetLabel: string | null;
+  staStart: number | null;
+  staEnd: number | null;
+  damageCategory: string | null;
+  damageCriteria: string | null;
+  damageDescription: string | null;
+  repairPriority: string | null;
+  repairRecommendation: string | null;
+  repairStatus: string | null;
+  majorRepairType: string | null;
+  currentStage: number | null;
+  spmDueAt: string | null;
+  slaDueAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** One bounded page of major asset damage exposures. */
+export interface MajorAssetDamageExposurePage {
+  rows: MajorAssetDamageExposure[];
+  total: number;
+  totalPages: number;
+  page: number;
+  limit: number;
+}
+
 export interface SectionIncidentCounts {
   sectionId: number;
   sectionName: string | null;
@@ -89,6 +169,14 @@ export interface SectionRunningCost {
 export interface TromSession {
   listSections(): Promise<TromSection[]>;
   getSpmSlaBySection(period?: TromPeriod): Promise<SectionSpmSla[]>;
+  getSpmSlaTrend(period: TromPeriod, sectionId?: number): Promise<SpmSlaTrendPoint[]>;
+  getSpmSlaIndicatorDetail(
+    sectionId: number,
+    period: TromPeriod,
+  ): Promise<SpmSlaIndicatorDetail>;
+  listMajorAssetDamageExposures(
+    query: MajorAssetDamageExposureQuery,
+  ): Promise<MajorAssetDamageExposurePage>;
   getIncidentCountsBySection(period?: TromPeriod): Promise<SectionIncidentCounts[]>;
   listIncidents(period?: TromPeriod, sectionId?: number): Promise<TromIncident[]>;
   getInspectionCountsBySection(period?: TromPeriod): Promise<SectionInspectionCounts[]>;
@@ -149,6 +237,145 @@ export class TromApi {
       scoreSla: numberOrNull(valueOf(row, ["score_sla", "scoreSla"]), "getSpmSlaBySection"),
       totalSpm: numberOrNull(valueOf(row, ["total_spm", "totalSpm"]), "getSpmSlaBySection"),
     }));
+  }
+
+  /** Returns monthly SPM/SLA trend facts in the source order. */
+  async getSpmSlaTrend(period: TromPeriod, sectionId?: number): Promise<SpmSlaTrendPoint[]> {
+    const resolved = resolvePeriod(period, this.#now);
+    const params = periodParams(resolved);
+    const validSectionId = validateSectionId(sectionId);
+    if (validSectionId !== undefined) params.set("section_id", String(validSectionId));
+    const data = await this.#arrayData(
+      "getSpmSlaTrend",
+      "/dashboard/spm-sla/trend-spm-sla",
+      params,
+    );
+    return data.map((row) => ({
+      month: stringOrNull(valueOf(row, ["month"]), "getSpmSlaTrend"),
+      scoreSpm: numberOrNull(valueOf(row, ["score_spm", "scoreSpm"]), "getSpmSlaTrend"),
+      scoreSla: numberOrNull(valueOf(row, ["score_sla", "scoreSla"]), "getSpmSlaTrend"),
+    }));
+  }
+
+  /** Returns bounded SPM indicator detail without inferring result provenance. */
+  async getSpmSlaIndicatorDetail(
+    sectionId: number,
+    period: TromPeriod,
+  ): Promise<SpmSlaIndicatorDetail> {
+    const resolved = resolvePeriod(period, this.#now);
+    const validSectionId = validateSectionId(sectionId);
+    if (validSectionId === undefined) {
+      throw new TypeError("TROM indicator detail requires a section ID.");
+    }
+    const operation = "getSpmSlaIndicatorDetail";
+    const body = await this.#request(
+      operation,
+      "/dashboard/spm-sla/detail-section-spm-sla",
+      new URLSearchParams({
+        section_id: String(validSectionId),
+        start_periode: resolved.start,
+        end_periode: resolved.end,
+      }),
+    );
+    if (!Array.isArray(body.data)) invalidData(operation);
+    const indicators = body.data
+      .map((entry) => asRecord(entry, operation))
+      .filter((row) => row.category === "spm");
+    const truncated = indicators.length > 250;
+    return {
+      sectionId: requiredNumber(body, "section_id", operation),
+      sectionName: stringOrNull(valueOf(body, ["section_name"]), operation),
+      lastUpdatedAt: stringOrNull(valueOf(body, ["last_updated_at", "lastUpdatedAt"]), operation),
+      scoreSpm: numberOrNull(valueOf(body, ["score_spm", "scoreSpm"]), operation),
+      scoreSla: numberOrNull(valueOf(body, ["score_sla", "scoreSla"]), operation),
+      indicators: indicators.slice(0, 250).map((row) => ({
+        id: requiredNumber(row, "id", operation),
+        serviceSubstanceId: numberOrNull(
+          valueOf(row, ["service_substance_id", "serviceSubstanceId"]), operation,
+        ),
+        code: stringOrNull(valueOf(row, ["code"]), operation),
+        indicator: stringOrNull(valueOf(row, ["indicator"]), operation),
+        subIndicator: stringOrNull(valueOf(row, ["sub_indicator", "subIndicator"]), operation),
+        spmSpecification: stringOrNull(
+          valueOf(row, ["spm_specification", "spmSpecification"]), operation,
+        ),
+        spmParameter: numberOrNull(valueOf(row, ["spm_parameter", "spmParameter"]), operation),
+        slaSpecification: stringOrNull(
+          valueOf(row, ["sla_specification", "slaSpecification"]), operation,
+        ),
+        slaParameter: numberOrNull(valueOf(row, ["sla_parameter", "slaParameter"]), operation),
+        operator: stringOrNull(valueOf(row, ["operator", "rel_operator"]), operation),
+        unit: stringOrNull(valueOf(row, ["unit", "rel_unit"]), operation),
+        spmScore: booleanOrNull(valueOf(row, ["spm_score", "spmScore"]), operation),
+        slaScore: booleanOrNull(valueOf(row, ["sla_score", "slaScore"]), operation),
+        resultBasis: "measured-or-default-unidentified" as const,
+      })),
+      truncated,
+    };
+  }
+
+  /** Returns a bounded, person-free page of major asset damage exposures. */
+  async listMajorAssetDamageExposures(
+    query: MajorAssetDamageExposureQuery,
+  ): Promise<MajorAssetDamageExposurePage> {
+    if (!isRecord(query) || !isRecord(query.period)) {
+      throw new TypeError("TROM major asset damage exposures require a period.");
+    }
+    const period = resolvePeriod(query.period, this.#now);
+    const repairStatus = validateRepairStatus(query.repairStatus);
+    const sectionId = validateSectionId(query.sectionId);
+    const page = validatePageNumber(query.page, "page", 1);
+    const limit = validatePageNumber(query.limit, "limit", 50, 50);
+    const params = new URLSearchParams({
+      start_date: period.start,
+      end_date: period.end,
+      repair_status_code: repairStatus,
+      page: String(page),
+      limit: String(limit),
+    });
+    if (sectionId !== undefined) params.set("section_id", String(sectionId));
+
+    const operation = "listMajorAssetDamageExposures";
+    const body = await this.#request(operation, "/major-asset-damages/list", params);
+    if (!Array.isArray(body.data)) invalidData(operation);
+    return {
+      rows: body.data.map((entry) => {
+        const row = asRecord(entry, operation);
+        return {
+          id: requiredNumber(row, "id", operation),
+          sectionId: requiredNumber(row, "section_id", operation),
+          sectionName: stringOrNull(
+            valueOf(row, ["rel_section_id", "section_name", "sectionName"]), operation,
+          ),
+          date: stringOrNull(valueOf(row, ["date"]), operation),
+          assetLabel: stringOrNull(
+            valueOf(row, ["rel_asset_id", "asset_label", "assetLabel"]), operation,
+          ),
+          staStart: numberOrNull(valueOf(row, ["sta_start", "staStart"]), operation),
+          staEnd: numberOrNull(valueOf(row, ["sta_end", "staEnd"]), operation),
+          damageCategory: stringOrNull(
+            valueOf(row, ["rel_damage_category_id", "damage_category"]), operation,
+          ),
+          damageCriteria: stringOrNull(valueOf(row, ["damage_criteria"]), operation),
+          damageDescription: stringOrNull(valueOf(row, ["damage_description"]), operation),
+          repairPriority: stringOrNull(valueOf(row, ["repair_priority"]), operation),
+          repairRecommendation: stringOrNull(
+            valueOf(row, ["rel_repair_recommendation_id", "repair_recommendation"]), operation,
+          ),
+          repairStatus: stringOrNull(valueOf(row, ["repair_status_code"]), operation),
+          majorRepairType: stringOrNull(valueOf(row, ["major_repair_type"]), operation),
+          currentStage: numberOrNull(valueOf(row, ["stage", "current_stage"]), operation),
+          spmDueAt: stringOrNull(valueOf(row, ["spm_due_at"]), operation),
+          slaDueAt: stringOrNull(valueOf(row, ["sla_due_at"]), operation),
+          createdAt: stringOrNull(valueOf(row, ["created_at"]), operation),
+          updatedAt: stringOrNull(valueOf(row, ["updated_at"]), operation),
+        };
+      }),
+      total: requiredNumber(body, "total", operation),
+      totalPages: requiredNumber(body, "totalPage", operation),
+      page,
+      limit,
+    };
   }
 
   /** Returns source incident counts grouped by section. */
@@ -264,9 +491,12 @@ export class TromApi {
     }));
   }
 
-  /** Returns source report totals for a period. */
+  /** Returns source report totals for one calendar month's period. */
   async getReportCompleteness(period?: TromPeriod): Promise<ReportCompleteness> {
     const resolved = resolvePeriod(period, this.#now);
+    if (resolved.start.slice(0, 7) !== resolved.end.slice(0, 7)) {
+      throw new TypeError("TROM report completeness supports one calendar month only.");
+    }
     const data = await this.#objectData(
       "getReportCompleteness",
       "/dashboard/activity/recap-by-report-status",
@@ -475,6 +705,29 @@ export function validateSectionId(sectionId: number | undefined): number | undef
     throw new TypeError("TROM section ID must be a positive integer.");
   }
   return sectionId;
+}
+
+function validateRepairStatus(value: unknown): MajorAssetDamageRepairStatus {
+  if (value !== "OPEN" && value !== "ON_PROGRESS") {
+    throw new TypeError("TROM repair status must be OPEN or ON_PROGRESS.");
+  }
+  return value;
+}
+
+function validatePageNumber(
+  value: unknown,
+  label: string,
+  defaultValue: number,
+  maximum?: number,
+): number {
+  const number = value === undefined ? defaultValue : value;
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
+    throw new TypeError(`TROM ${label} must be a positive integer.`);
+  }
+  if (maximum !== undefined && number > maximum) {
+    throw new TypeError(`TROM ${label} must not exceed ${maximum}.`);
+  }
+  return number;
 }
 
 function periodParams(period: TromPeriod): URLSearchParams {

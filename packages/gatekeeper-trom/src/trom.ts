@@ -21,6 +21,9 @@ import type {
   ObservationAuthorizer,
   ResourceConfiguratorFrame,
   ResourceDescription,
+  SlashCommandDescriptor,
+  SlashCommandProvider,
+  SlashCommandResult,
   SupportedResource,
   VendorDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
@@ -29,12 +32,16 @@ import {
   TromApi,
   resolvePeriod,
   validateSectionId,
+  type MajorAssetDamageExposurePage,
+  type MajorAssetDamageExposureQuery,
   type SectionEquipmentAvailability,
   type SectionIncidentCounts,
   type SectionInspectionCounts,
   type SectionRunningCost,
   type SectionSpmSla,
   type ReportCompleteness,
+  type SpmSlaIndicatorDetail,
+  type SpmSlaTrendPoint,
   type TromIncident,
   type TromPeriod,
   type TromSection,
@@ -49,6 +56,35 @@ const TROM_ICON = {
       "<path d='M32 48h192v32H32zm24 56h144v32H56zm32 56h80v32H88z'/></svg>",
     ),
 };
+
+const TROM_EXECUTIVE_REVIEW_PROMPT =
+  "Use the HKA TROM capability to conduct an executive investigation of SPM/SLA exposure for the coming quarter. Screen the section portfolio, form candidate hypotheses, drill into relevant operational evidence, seek counter-evidence, and discard weak or immaterial findings. For each remaining finding, state the section, indicator, period, baseline, supporting evidence, contrary evidence, data limitations, materiality, intervention window, confidence, and what would disprove the conclusion. Do not treat missing records as good performance, invent unavailable facts, or produce an opaque risk score. Present the investigation in this chat. Afterward, if Scheduled Tasks is available, offer to establish a monthly investigation and quarterly synthesis in this same chat; do not create recurring automation without explicit approval.";
+
+class TromSlashCommandProvider extends RpcTarget implements SlashCommandProvider {
+  /** Lists the one fixed executive investigation command. */
+  list(): Promise<SlashCommandDescriptor[]> {
+    return Promise.resolve([{
+      id: "trom-executive-review",
+      name: "trom-executive-review",
+      description: "Start a factual executive SPM/SLA investigation.",
+    }]);
+  }
+
+  /** Expands the fixed command without reading protected TROM data. */
+  async invoke(
+    id: string,
+    _args: string,
+    _authorizer: NativeRpcStub<ObservationAuthorizer>,
+  ): Promise<SlashCommandResult> {
+    if (id !== "trom-executive-review") {
+      throw new Error("Unknown HKA TROM slash command.");
+    }
+    return { message: TROM_EXECUTIVE_REVIEW_PROMPT };
+  }
+
+  /** Releases no command-specific resources. */
+  [Symbol.dispose](): void {}
+}
 
 /** Read-only session implementation backed by the configured deployment service account. */
 @validateRpc()
@@ -80,6 +116,59 @@ export class TromSessionImpl extends RpcTarget implements TromSession {
     const rows = await this.#api.getSpmSlaBySection(resolved);
     await this.#authorize("SPM/SLA facts", resolved);
     return rows;
+  }
+
+  /** Reads monthly SPM/SLA trend facts after observation authorization. */
+  async getSpmSlaTrend(period: TromPeriod, sectionId?: number): Promise<SpmSlaTrendPoint[]> {
+    const resolved = resolvePeriod(period);
+    const validSectionId = validateSectionId(sectionId);
+    const rows = await this.#api.getSpmSlaTrend(resolved, validSectionId);
+    await this.#authorize("SPM/SLA monthly trend", resolved);
+    return rows;
+  }
+
+  /** Reads bounded SPM/SLA indicator detail after observation authorization. */
+  async getSpmSlaIndicatorDetail(
+    sectionId: number,
+    period: TromPeriod,
+  ): Promise<SpmSlaIndicatorDetail> {
+    const resolved = resolvePeriod(period);
+    const validSectionId = validateSectionId(sectionId);
+    if (validSectionId === undefined) {
+      throw new TypeError("TROM indicator detail requires a section ID.");
+    }
+    const detail = await this.#api.getSpmSlaIndicatorDetail(validSectionId, resolved);
+    await this.#authorize(`SPM/SLA indicator detail for section ${validSectionId}`, resolved);
+    return detail;
+  }
+
+  /** Reads paged major asset damage exposures after observation authorization. */
+  async listMajorAssetDamageExposures(
+    query: MajorAssetDamageExposureQuery,
+  ): Promise<MajorAssetDamageExposurePage> {
+    if (query === null || typeof query !== "object" || query.period === undefined) {
+      throw new TypeError("TROM major asset damage exposures require a period.");
+    }
+    if (query.repairStatus !== "OPEN" && query.repairStatus !== "ON_PROGRESS") {
+      throw new TypeError("TROM repair status must be OPEN or ON_PROGRESS.");
+    }
+    if (query.page !== undefined && (!Number.isInteger(query.page) || query.page < 1)) {
+      throw new TypeError("TROM page must be a positive integer.");
+    }
+    if (query.limit !== undefined &&
+        (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 50)) {
+      throw new TypeError("TROM limit must be a positive integer no greater than 50.");
+    }
+    const period = resolvePeriod(query.period);
+    const validSectionId = validateSectionId(query.sectionId);
+    const page = await this.#api.listMajorAssetDamageExposures({
+      ...query,
+      period,
+      sectionId: validSectionId,
+    });
+    const suffix = validSectionId === undefined ? "" : ` for section ${validSectionId}`;
+    await this.#authorize(`${query.repairStatus} major asset damage exposures${suffix}`, period);
+    return page;
   }
 
   /** Reads incident counts grouped by section after observation authorization. */
@@ -154,6 +243,7 @@ export class TromGatekeeper extends DurableObject<Cloudflare.Env> implements Gat
       snippet: "Read factual operational data from HKA TROM.",
       suggestedBindingName: "TROM",
       tsType: "TromSession",
+      hasSlashCommands: true,
     };
   }
 
@@ -170,6 +260,11 @@ export class TromGatekeeper extends DurableObject<Cloudflare.Env> implements Gat
   /** Starts a session with a duplicate authorizer owned by that session. */
   async startSession(approvalQueue: NativeRpcStub<ApprovalQueue>): Promise<TromSessionImpl> {
     return new TromSessionImpl(new TromApi(this.env), approvalQueue.dup());
+  }
+
+  /** Returns the fixed executive investigation command provider. */
+  async getSlashCommandProvider(): Promise<SlashCommandProvider> {
+    return new TromSlashCommandProvider();
   }
 
   /** Returns no catalog because the session methods expose factual datasets directly. */
