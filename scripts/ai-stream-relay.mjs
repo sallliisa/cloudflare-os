@@ -16,6 +16,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 const RESPONSE_ONLY_DROPPED_HEADERS = new Set(["content-encoding", "content-length"]);
+const RELAY_PATHS = new Set(["/v1/responses", "/v1/chat/completions"]);
 const DEFAULT_PORT = 18789;
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000;
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -82,7 +83,7 @@ function safeError(error) {
   return error instanceof Error ? `${error.name}: ${error.message}` : "UnknownError";
 }
 
-/** Creates a loopback-only relay for the fixed OpenAI Responses endpoint. */
+/** Creates a loopback-only relay for fixed OpenAI-compatible endpoints. */
 export function createAiStreamRelay({
   upstreamOrigin,
   port = DEFAULT_PORT,
@@ -95,11 +96,12 @@ export function createAiStreamRelay({
   const server = createServer(async (request, response) => {
     const startedAt = Date.now();
     const requestId = crypto.randomUUID();
+    const requestPath = request.url?.split("?")[0];
     const writeLog = (event, fields = {}) => log(JSON.stringify({
       requestId,
       event,
       method: request.method,
-      path: request.url?.split("?")[0],
+      path: requestPath,
       durationMs: Date.now() - startedAt,
       ...fields,
     }));
@@ -110,7 +112,7 @@ export function createAiStreamRelay({
       writeLog("healthz", { outcome: "ok" });
       return;
     }
-    if (request.url?.split("?")[0] !== "/v1/responses") {
+    if (!RELAY_PATHS.has(requestPath)) {
       response.writeHead(404).end();
       writeLog("rejected", { outcome: "not_found" });
       return;
@@ -136,7 +138,7 @@ export function createAiStreamRelay({
     try {
       let upstream;
       try {
-        upstream = await fetchImpl(new URL("/v1/responses", origin), {
+        upstream = await fetchImpl(new URL(requestPath, origin), {
           method: "POST",
           headers: requestHeaders(request.headers),
           body: request,

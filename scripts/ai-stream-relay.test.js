@@ -75,29 +75,31 @@ describe("AI stream relay", () => {
     assert.equal((await fetch(`${origin}/v1/responses`)).status, 405);
   });
 
-  it("forwards the fixed endpoint, permitted headers, and streamed request body", async t => {
-    let received;
-    const { origin } = await startRelay(t, {
-      fetchImpl: async (url, init) => {
-        received = { url: String(url), init, body: await readBody(init.body) };
-        return new Response("done", { headers: { "content-type": "text/plain" } });
-      },
+  for (const path of ["/v1/responses", "/v1/chat/completions"]) {
+    it(`forwards ${path}, permitted headers, and streamed request body`, async t => {
+      let received;
+      const { origin } = await startRelay(t, {
+        fetchImpl: async (url, init) => {
+          received = { url: String(url), init, body: await readBody(init.body) };
+          return new Response("done", { headers: { "content-type": "text/plain" } });
+        },
+      });
+      const response = await fetch(`${origin}${path}`, {
+        method: "POST",
+        headers: { authorization: "Bearer sentinel-token", "content-type": "application/json" },
+        body: "sentinel-prompt",
+      });
+      assert.equal(await response.text(), "done");
+      assert.equal(received.url, `https://upstream.example${path}`);
+      assert.equal(received.init.method, "POST");
+      assert.equal(received.init.headers.get("authorization"), "Bearer sentinel-token");
+      assert.equal(received.init.headers.get("content-type"), "application/json");
+      assert.equal(received.init.headers.get("connection"), null);
+      assert.equal(received.init.headers.get("content-length"), null);
+      assert.equal(received.init.headers.get("host"), null);
+      assert.equal(received.body, "sentinel-prompt");
     });
-    const response = await fetch(`${origin}/v1/responses`, {
-      method: "POST",
-      headers: { authorization: "Bearer sentinel-token", "content-type": "application/json" },
-      body: "sentinel-prompt",
-    });
-    assert.equal(await response.text(), "done");
-    assert.equal(received.url, "https://upstream.example/v1/responses");
-    assert.equal(received.init.method, "POST");
-    assert.equal(received.init.headers.get("authorization"), "Bearer sentinel-token");
-    assert.equal(received.init.headers.get("content-type"), "application/json");
-    assert.equal(received.init.headers.get("connection"), null);
-    assert.equal(received.init.headers.get("content-length"), null);
-    assert.equal(received.init.headers.get("host"), null);
-    assert.equal(received.body, "sentinel-prompt");
-  });
+  }
 
   it("streams SSE while dropping unsafe response headers and sensitive logs", async t => {
     const { logs, origin } = await startRelay(t, {
